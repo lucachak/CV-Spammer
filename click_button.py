@@ -6,9 +6,53 @@ import random
 import getpass
 import platform
 import glob
+import traceback
+from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
+
+# Modern Python (3.12+) compatibility patch for undetected_chromedriver
+import types
+try:
+    import distutils.version
+except ImportError:
+    class LooseVersion:
+        def __init__(self, versionstring):
+            self.version = versionstring
+            self.vstring = versionstring
+            self.parts = [int(x) if x.isdigit() else x for x in re.split(r'(\d+)', versionstring) if x]
+        def __str__(self):
+            return self.version
+        def __repr__(self):
+            return f"LooseVersion('{self.version}')"
+        def __eq__(self, other):
+            if not isinstance(other, LooseVersion):
+                return NotImplemented
+            return self.parts == other.parts
+        def __lt__(self, other):
+            if not isinstance(other, LooseVersion):
+                return NotImplemented
+            return self.parts < other.parts
+        def __le__(self, other):
+            if not isinstance(other, LooseVersion):
+                return NotImplemented
+            return self.parts <= other.parts
+        def __gt__(self, other):
+            if not isinstance(other, LooseVersion):
+                return NotImplemented
+            return self.parts > other.parts
+        def __ge__(self, other):
+            if not isinstance(other, LooseVersion):
+                return NotImplemented
+            return self.parts >= other.parts
+
+    distutils = types.ModuleType("distutils")
+    distutils_version = types.ModuleType("distutils.version")
+    distutils_version.LooseVersion = LooseVersion
+    distutils.version = distutils_version
+    sys.modules["distutils"] = distutils
+    sys.modules["distutils.version"] = distutils_version
 
 # pyrefly: ignore [missing-import]
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 # pyrefly: ignore [missing-import]
 from selenium import webdriver
 # pyrefly: ignore [missing-import]
@@ -25,11 +69,10 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 # pyrefly: ignore [missing-import]
 from selenium.common.exceptions import StaleElementReferenceException
-
-try:
-    import pyautogui
-except Exception:
-    pyautogui = None
+# pyrefly: ignore [missing-import]
+from selenium.webdriver.common.keys import Keys
+# pyrefly: ignore [missing-import]
+import undetected_chromedriver as uc
 
 # ==========================================
 # BEAUTIFUL TERMINAL STYLING
@@ -70,29 +113,30 @@ def print_banner():
 # ==========================================
 # DEFAULT CONFIGURATIONS (Overrideable via .env)
 # ==========================================
-TEST_MODE = True
-REAL_BASE_URL = "https://www.catho.com.br/vagas/programador-python/sao-paulo-sp/?order=dataAtualizacao"
-MAX_PAGES_TO_SCRAPE = 50
-CATHO_EMAIL = "your_email@example.com"
-CATHO_PASSWORD = "your_password"
-MIN_DELAY = 1.5
-MAX_DELAY = 3.0
-KEYWORDS_WORKLIST = ["programador-python", "java", "backend", "programador-junior", "programador-jr", "estagio"]
-SENIOR_TERMS = ["senior", "sênior", "sn", "sr"]
-VERBOSE = False
-# ==========================================
+
+@dataclass
+class ScraperConfig:
+    TEST_MODE: bool = True
+    REAL_BASE_URL: str = "https://www.catho.com.br/vagas/programador-python/sao-paulo-sp/?order=dataAtualizacao"
+    MAX_PAGES_TO_SCRAPE: int = 50
+    MIN_DELAY: float = 1.5
+    MAX_DELAY: float = 3.0
+    KEYWORDS_WORKLIST: list = field(default_factory=lambda: ["programador-python", "java", "backend", "programador-junior", "programador-jr", "estagio"])
+    SENIOR_TERMS: list = field(default_factory=lambda: ["senior", "sênior", "sn", "sr"])
+    VERBOSE: bool = False
 
 @dataclass
 class UserCredentials:
-    email: str
-    password: str
+    email: str = "your_email@example.com"
+    password: str = "your_password"
 
 def load_env_configurations():
     """
     Helper function to safely parse all configuration variables from the local .env
-    and override global constants if they exist.
+    and override defaults if they exist.
     """
-    global TEST_MODE, REAL_BASE_URL, MAX_PAGES_TO_SCRAPE, CATHO_EMAIL, CATHO_PASSWORD, MIN_DELAY, MAX_DELAY, KEYWORDS_WORKLIST, SENIOR_TERMS, VERBOSE
+    config = ScraperConfig()
+    credentials = UserCredentials()
     
     env_path = os.path.abspath(".env")
     if os.path.exists(env_path):
@@ -108,167 +152,76 @@ def load_env_configurations():
                         val_str = val.strip().strip("'").strip('"')
                         
                         if key_str == "email":
-                            CATHO_EMAIL = val_str
+                            credentials.email = val_str
                         elif key_str == "passwd":
-                            CATHO_PASSWORD = val_str
+                            credentials.password = val_str
                         elif key_str == "TEST_MODE":
-                            TEST_MODE = val_str.lower() in ("true", "1", "yes", "on")
+                            config.TEST_MODE = val_str.lower() in ("true", "1", "yes", "on")
                         elif key_str == "REAL_BASE_URL":
-                            REAL_BASE_URL = val_str
+                            config.REAL_BASE_URL = val_str
                         elif key_str == "MAX_PAGES_TO_SCRAPE":
                             try:
-                                MAX_PAGES_TO_SCRAPE = int(val_str)
+                                config.MAX_PAGES_TO_SCRAPE = int(val_str)
                             except ValueError:
                                 pass
                         elif key_str == "MIN_DELAY":
                             try:
-                                MIN_DELAY = float(val_str)
+                                config.MIN_DELAY = float(val_str)
                             except ValueError:
                                 pass
                         elif key_str == "MAX_DELAY":
                             try:
-                                MAX_DELAY = float(val_str)
+                                config.MAX_DELAY = float(val_str)
                             except ValueError:
                                 pass
                         elif key_str == "KEYWORDS_WORKLIST":
-                            KEYWORDS_WORKLIST = [k.strip() for k in val_str.split(",") if k.strip()]
+                            config.KEYWORDS_WORKLIST = [k.strip() for k in val_str.split(",") if k.strip()]
                         elif key_str == "SENIOR_TERMS":
-                            SENIOR_TERMS = [s.strip().lower() for s in val_str.split(",") if s.strip()]
+                            config.SENIOR_TERMS = [s.strip().lower() for s in val_str.split(",") if s.strip()]
                         elif key_str == "VERBOSE":
-                            VERBOSE = val_str.lower() in ("true", "1", "yes", "on")
+                            config.VERBOSE = val_str.lower() in ("true", "1", "yes", "on")
                                 
             print(f"{Colors.GREEN}✔{Colors.END} {Colors.BOLD}[.env Loaded]{Colors.END} Configurations and credentials loaded successfully from local .env file.")
         except Exception as e:
             print(f"{Colors.RED}✘{Colors.END} {Colors.BOLD}[.env Read Error]{Colors.END} Could not parse .env file: {e}")
+            
+    return config, credentials
 
-def setup_driver(headless: bool = False):
+def setup_driver(config: ScraperConfig, headless: bool = False):
     """
-    [PHANTOM] Elite browser initialization module.
-    Features:
-      - Cross-platform local profile resolution (Windows/Linux)
-      - Chromium CDP deep-stealth patch injections
-      - Automatic Gecko/Firefox fallback with equivalent stealth parameters
+    Elite browser initialization module using undetected_chromedriver.
     """
-    os_name = platform.system()
     workspace_dir = os.path.abspath(os.path.dirname(__file__))
+    bot_profile = os.path.join(workspace_dir, "src")
     
-    # -------------------------------------------------------------------------
-    # 1. ATTEMPT CHROMIUM STEALTH INITIALIZATION
-    # -------------------------------------------------------------------------
     try:
-        chrome_options = ChromeOptions()
+        chrome_options = uc.ChromeOptions()
         if headless:
             chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1280,800")
         
-        # Profile resolution logic
-        src_profile = os.path.join(workspace_dir, "src", "Default")
-        local_profile = os.path.join(workspace_dir, "Default")
-        
-        # OS-specific default Chrome profiles
-        system_profile = None
-        if os_name == "Windows":
-            system_profile = os.path.expanduser("~\\AppData\\Local\\Google\\Chrome\\User Data")
-        elif os_name == "Linux":
-            system_profile = os.path.expanduser("~/.config/google-chrome")
-            
-        if os.path.exists(src_profile):
-            print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Detected local 'src' profile.")
-            chrome_options.add_argument(f"--user-data-dir={os.path.join(workspace_dir, 'src')}")
-            chrome_options.add_argument("--profile-directory=Default")
-        elif os.path.exists(local_profile):
-            print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Detected local workspace 'Default' profile.")
-            chrome_options.add_argument(f"--user-data-dir={workspace_dir}")
-            chrome_options.add_argument("--profile-directory=Default")
-        elif system_profile and os.path.exists(system_profile):
-            print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Detected System Chrome Profile at {Colors.DIM}{system_profile}{Colors.END}")
-            chrome_options.add_argument(f"--user-data-dir={system_profile}")
-            chrome_options.add_argument("--profile-directory=Default")
-            
-        # --- PHANTOM: Deep Anti-Bot CDP Evasions ---
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        
-        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" if os_name == "Windows" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        chrome_options.add_argument(f"user-agent={ua}")
-        
         chrome_options.add_experimental_option("prefs", {
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False
         })
         
-        driver = webdriver.Chrome(options=chrome_options)
+        print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Starting undetected-chromedriver with profile: {Colors.DIM}{bot_profile}{Colors.END}")
         
-        # CDP Inject: Overwrite Webdriver, WebGL, Plugins, and Languages on EVERY page load
-        stealth_js = """
-            // Erase webdriver flag
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            
-            // Spoof Plugins to bypass fingerprinting (Chrome PDF Viewer etc)
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-            
-            // Set languages natively
-            Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en-US', 'en']});
-            
-            // Mask WebGL Renderer (Intel Iris / standard GPU instead of SwiftShader/virtual)
-            const getParameter = WebGLRenderingContext.prototype.getParameter;
-            WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) return 'Intel Inc.';
-                if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-                return getParameter.apply(this, arguments);
-            };
-            
-            // Inject fake window.chrome object
-            window.chrome = {
-                app: { isInstalled: false },
-                webstore: { onInstallStageChanged: {}, onDownloadProgress: {} },
-                runtime: { PlatformOs: { MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd' } }
-            };
-        """
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_js})
-        
+        driver = uc.Chrome(
+            options=chrome_options,
+            user_data_dir=bot_profile
+        )
         return driver
         
     except Exception as chrome_err:
-        print(f"\n{Colors.YELLOW}⚠️ [Fallback]{Colors.END} Chromium initialization failed: {chrome_err}")
-        print(f"{Colors.CYAN}➤{Colors.END} Initializing Mozilla Firefox (Gecko) fallback with stealth configurations...")
-        
-        # -------------------------------------------------------------------------
-        # 2. ATTEMPT FIREFOX (GECKO) STEALTH FALLBACK
-        # -------------------------------------------------------------------------
-        firefox_options = FirefoxOptions()
-        if headless:
-            firefox_options.add_argument("--headless")
-            
-        # Firefox Anti-Bot properties
-        firefox_options.set_preference("dom.webdriver.enabled", False)
-        firefox_options.set_preference("useAutomationExtension", False)
-        firefox_options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0")
-        firefox_options.set_preference("webgl.disabled", False)
-        firefox_options.set_preference("webgl.renderer-string-override", "Intel Iris OpenGL Engine")
-        firefox_options.set_preference("webgl.vendor-string-override", "Intel Inc.")
-        
-        # Attempt to load Firefox profile
-        ff_profile_dir = None
-        if os_name == "Windows":
-            ff_profile_dir = os.path.expanduser("~\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles")
-        elif os_name == "Linux":
-            ff_profile_dir = os.path.expanduser("~/.mozilla/firefox")
-            
-        if ff_profile_dir and os.path.exists(ff_profile_dir):
-            profiles = glob.glob(os.path.join(ff_profile_dir, "*.default*"))
-            if profiles:
-                print(f"  {Colors.GREEN}✔{Colors.END} Found native Firefox profile: {Colors.DIM}{profiles[0]}{Colors.END}")
-                firefox_options.add_argument("-profile")
-                firefox_options.add_argument(profiles[0])
-                
-        driver = webdriver.Firefox(options=firefox_options)
-        return driver
+        print(f"\n{Colors.RED}❌ [FATAL]{Colors.END} Chromium initialization failed: {chrome_err}")
+        if config.VERBOSE:
+            traceback.print_exc()
+        raise
 
-def highlight_element(driver, element, color="#ff4393"):
+def highlight_element(driver, element, config: ScraperConfig, color="#ff4393"):
     #obs, eu tentei nao usar isso, mas pqp... 
 
     try:
@@ -280,9 +233,10 @@ def highlight_element(driver, element, color="#ff4393"):
         time.sleep(0.8) 
         driver.execute_script("arguments[0].setAttribute('style', arguments[1]);", element, original_style)
     except Exception:
-        pass  
+        if config.VERBOSE:
+            traceback.print_exc()
 
-def close_possible_popups(driver):
+def close_possible_popups(driver, config: ScraperConfig):
     # Detect visible modal/popup/consent/dialog containers first to avoid false-positive clicks on layout filter tags
     modal_container_selectors = [
         "div[class*='modal' i]", 
@@ -354,37 +308,28 @@ def close_possible_popups(driver):
                 
     # Fallback: ESC key dismissal if we detected active containers but couldn't click any specific close button
     if not closed_any:
-        if VERBOSE:
+        if config.VERBOSE:
             print(f"  {Colors.YELLOW}⚠️ [POPUP]{Colors.END} Active modal container found. Attempting ESC dismissal fallback...")
         try:
-            # pyrefly: ignore [missing-import]
-            from selenium.webdriver.common.keys import Keys
             active_elem = driver.switch_to.active_element
             if active_elem:
                 active_elem.send_keys(Keys.ESCAPE)
-                if VERBOSE:
+                if config.VERBOSE:
                     print(f"  {Colors.DIM}  -> Sent native Keys.ESCAPE to active element.{Colors.END}")
         except Exception:
-            pass
-            
-        if pyautogui:
-            try:
-                pyautogui.press('esc')
-                if VERBOSE:
-                    print(f"  {Colors.DIM}  -> Pressed physical ESC key via PyAutoGUI.{Colors.END}")
-            except Exception:
-                pass
+            if config.VERBOSE:
+                traceback.print_exc()
 
-def login_to_catho(driver, credentials: UserCredentials):
+def login_to_catho(driver, credentials: UserCredentials, config: ScraperConfig) -> bool:
 
     wait = WebDriverWait(driver, 15)
     
     try:
-        if TEST_MODE:
+        if config.TEST_MODE:
             login_file_path = os.path.abspath("Catho Login.html")
             if not os.path.exists(login_file_path):
                 print(f"[TEST MODE] Error: Could not find 'Catho Login.html' at {login_file_path}")
-                return
+                return False
             login_url = f"file://{login_file_path}"
             print(f"\n[Login Process - TEST MODE] Loading local login template: {login_url}")
             driver.get(login_url)
@@ -402,7 +347,7 @@ def login_to_catho(driver, credentials: UserCredentials):
                    driver.find_elements(By.CSS_SELECTOR, "a.user-avatar") or \
                    ("signin" not in driver.current_url.lower() and "login" not in driver.current_url.lower() and len(driver.find_elements(By.ID, "signin")) == 0):
                     print("  [SUCCESS] Already logged in via persistent Chrome session! Skipping login flow.")
-                    return
+                    return True
             except Exception:
                 pass
             
@@ -420,7 +365,7 @@ def login_to_catho(driver, credentials: UserCredentials):
                     cookie_btn = WebDriverWait(driver, 6).until(
                         EC.element_to_be_clickable((by, selector))
                     )
-                    highlight_element(driver, cookie_btn, color="#25D366")
+                    highlight_element(driver, cookie_btn, config, color="#25D366")
                     cookie_btn.click()
                     print("  [COOKIES] Clicked 'Aceitar todos os cookies' successfully.")
                     cookie_accepted = True
@@ -446,7 +391,7 @@ def login_to_catho(driver, credentials: UserCredentials):
             for by, selector in signin_link_selectors:
                 try:
                     signin_link = wait.until(EC.element_to_be_clickable((by, selector)))
-                    highlight_element(driver, signin_link, color="#3624d6")
+                    highlight_element(driver, signin_link, config, color="#3624d6")
                     signin_link.click()
                     print("  -> Clicked 'Entrar' link successfully.")
                     signin_clicked = True
@@ -491,7 +436,7 @@ def login_to_catho(driver, credentials: UserCredentials):
             raise Exception("Could not find the email/login input field.")
             
         print("  -> Entering email/CPF...")
-        highlight_element(driver, email_field, color="#25D366" if TEST_MODE else "#3624d6")
+        highlight_element(driver, email_field, config, color="#25D366" if config.TEST_MODE else "#3624d6")
         email_field.clear()
         email_field.send_keys(credentials.email)
         password_selectors = [
@@ -549,7 +494,7 @@ def login_to_catho(driver, credentials: UserCredentials):
             raise Exception("Could not locate the password field.")
             
         print("  -> Entering password...")
-        highlight_element(driver, password_field, color="#25D366" if TEST_MODE else "#3624d6")
+        highlight_element(driver, password_field, config, color="#25D366" if config.TEST_MODE else "#3624d6")
         password_field.clear()
         password_field.send_keys(credentials.password)
         
@@ -572,19 +517,19 @@ def login_to_catho(driver, credentials: UserCredentials):
             raise Exception("Could not locate the submit/login button.")
             
         print("  -> Clicking final 'Entrar' button...")
-        highlight_element(driver, submit_btn, color="#25D366" if TEST_MODE else "#3624d6")
+        highlight_element(driver, submit_btn, config, color="#25D366" if config.TEST_MODE else "#3624d6")
         
         # If in TEST_MODE, pause briefly to show fields filled, then click
-        if TEST_MODE:
+        if config.TEST_MODE:
             time.sleep(2.0)
             
         submit_btn.click()
         print("  -> Login form submitted successfully!")
         
-        if TEST_MODE:
+        if config.TEST_MODE:
             print("  [TEST MODE] Successfully simulated login flow locally. Settle delay...")
             time.sleep(3.0)
-            return
+            return True
             
         # Step 6: ''''Gracefully'''' handle Captchas/security checkpoints
         print("\n[Security Check] Monitoring for CAPTCHAs or manual verifications...")
@@ -618,21 +563,24 @@ def login_to_catho(driver, credentials: UserCredentials):
         else:
             time.sleep(2.0)  # Settle session cookies
             
+        return True
+            
     except Exception as e:
         print(f"\n[Login Failed] Could not automate the login flow: {e}")
         print("Continuing directly to the scraping page in case you are already logged in or want to log in manually.")
+        return False
 
-def contains_senior_terms(text: str) -> bool:
+def contains_senior_terms(text: str, config: ScraperConfig) -> bool:
     """
     Checks if the given text contains any senior-related keywords as distinct words.
     Uses regex word boundaries to avoid false positives.
     """
-    joined = "|".join([re.escape(term) for term in SENIOR_TERMS])
+    joined = "|".join([re.escape(term) for term in config.SENIOR_TERMS])
     pattern = re.compile(rf'\b({joined})\b', re.IGNORECASE)
     return bool(pattern.search(text))
 
-def process_page_buttons(driver) -> int:
-    close_possible_popups(driver)
+def process_page_buttons(driver, config: ScraperConfig) -> int:
+    close_possible_popups(driver, config)
     WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.TAG_NAME, "body"))
     )
@@ -643,7 +591,17 @@ def process_page_buttons(driver) -> int:
     
     # Pre-scan just to get an accurate total_valid count for the UI
     total_valid = 0
+    card_ids = []
+    
     for card in initial_cards:
+        try:
+            # Extract unique identifier to prevent index shifting
+            c_id = card.get_attribute("data-offer-item")
+            if c_id:
+                card_ids.append(c_id)
+        except Exception:
+            pass
+            
         if card.find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]"):
             total_valid += 1
             
@@ -651,27 +609,21 @@ def process_page_buttons(driver) -> int:
     
     clicked_count = 0
     skipped_count = 0
-    
-    # 2. Iterate dynamically by index. This completely eliminates StaleElementReferenceExceptions
-    # because we query the DOM fresh for the exact card we need every iteration.
-    current_card_index = 0
     valid_processed_count = 0
     
-    while current_card_index < total_cards_count:
+    for card_id in card_ids:
         try:
-            close_possible_popups(driver)
+            close_possible_popups(driver, config)
             
-            # Re-fetch the cards to ensure they are fresh in the DOM
-            current_cards = driver.find_elements(By.XPATH, "//li[@data-offer-item]")
-            if current_card_index >= len(current_cards):
-                break # DOM changed drastically, page probably refreshed
-                
-            card = current_cards[current_card_index]
+            # Re-fetch the specific card by ID to ensure it is fresh in the DOM
+            try:
+                card = driver.find_element(By.XPATH, f"//li[@data-offer-item='{card_id}']")
+            except Exception:
+                continue # Card vanished from DOM
             
             # Check if this card actually has an application button
             buttons = card.find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]")
             if not buttons:
-                current_card_index += 1
                 continue
                 
             button = buttons[0]
@@ -693,25 +645,23 @@ def process_page_buttons(driver) -> int:
                     pass
             
             # Check for Senior keywords
-            if contains_senior_terms(card_text):
+            if contains_senior_terms(card_text, config):
                 skipped_count += 1
-                if VERBOSE:
+                if config.VERBOSE:
                     matched_term = "SENIOR/SN"
-                    for term in SENIOR_TERMS:
+                    for term in config.SENIOR_TERMS:
                         if re.search(rf'\b{re.escape(term)}\b', card_text, re.IGNORECASE):
                             matched_term = term.upper()
                             break
                     print(f"  {Colors.YELLOW}⏭ [SKIPPED]{Colors.END} Skipping Senior role: '{Colors.BOLD}{job_title}{Colors.END}' (Matched: {Colors.YELLOW}{matched_term}{Colors.END})")
-                current_card_index += 1
                 continue
                 
             driver.execute_script(
-                "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", 
+                "arguments[0].scrollIntoView({behavior: 'auto', block: 'center'});", 
                 button
             )
-            time.sleep(0.5) 
             print(f"  {Colors.CYAN}➤{Colors.END} Targeting: '{Colors.BOLD}{job_title}{Colors.END}' ({valid_processed_count}/{total_valid})... ", end="", flush=True)
-            highlight_element(driver, button, color="#ff4393" if TEST_MODE else "#3624d6")
+            highlight_element(driver, button, config, color="#ff4393" if config.TEST_MODE else "#3624d6")
             
             try:
                 # PHANTOM: Realistic behavioral interaction pattern (Hover -> Small Delay -> Click)
@@ -720,17 +670,19 @@ def process_page_buttons(driver) -> int:
                 print(f"{Colors.GREEN}✔ [CLICK]{Colors.END}")
                 clicked_count += 1
             except Exception as click_err:
-                if VERBOSE:
+                if config.VERBOSE:
                     print(f"\n  {Colors.YELLOW}⚡ [INFO]{Colors.END} Click intercepted or failed. Clearing popups & retrying...")
-                close_possible_popups(driver)
+                close_possible_popups(driver, config)
                 time.sleep(0.6)
                 
                 # Because we cleared a popup, the DOM might have shifted. Re-fetch the exact button to prevent StaleElement!
-                current_cards = driver.find_elements(By.XPATH, "//li[@data-offer-item]")
-                if current_card_index < len(current_cards):
-                    retry_buttons = current_cards[current_card_index].find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]")
+                try:
+                    card = driver.find_element(By.XPATH, f"//li[@data-offer-item='{card_id}']")
+                    retry_buttons = card.find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]")
                     if retry_buttons:
                         button = retry_buttons[0]
+                except Exception:
+                    pass
                         
                 try:
                     actions = ActionChains(driver)
@@ -738,7 +690,7 @@ def process_page_buttons(driver) -> int:
                     print(f"{Colors.GREEN}✔ [CLICK (Retry)]{Colors.END}")
                     clicked_count += 1
                 except Exception:
-                    if VERBOSE:
+                    if config.VERBOSE:
                         print(f"\n  {Colors.YELLOW}⚙ [JS FALLBACK]{Colors.END} Standard click blocked. Clicking button via JavaScript...")
                     driver.execute_script("arguments[0].click();", button)
                     print(f"{Colors.GREEN}✔ [CLICK (JS)]{Colors.END}")
@@ -746,25 +698,20 @@ def process_page_buttons(driver) -> int:
                     
             # Immediately check and dismiss any success/confirmation modal that appeared
             time.sleep(0.6)
-            close_possible_popups(driver)
+            close_possible_popups(driver, config)
             
             # 4. Human-simulation sleep delay
-            delay = random.uniform(MIN_DELAY, MAX_DELAY)
-            if VERBOSE:
+            delay = random.uniform(config.MIN_DELAY, config.MAX_DELAY)
+            if config.VERBOSE:
                 print(f"  {Colors.BLUE}⏳ [HUMAN DELAY]{Colors.END} Waiting {Colors.BOLD}{delay:.2f}{Colors.END} seconds...")
             time.sleep(delay)
             
-            current_card_index += 1
-            
         except StaleElementReferenceException:
-            # The DOM shifted mid-loop. Just silently continue to the next iteration
-            # without incrementing the index so we re-evaluate this exact position.
-            if VERBOSE:
-                print(f"\n  {Colors.YELLOW}⚠️ [DOM Update]{Colors.END} Element went stale. Re-fetching DOM...")
+            if config.VERBOSE:
+                print(f"\n  {Colors.YELLOW}⚠️ [DOM Update]{Colors.END} Element went stale.")
             continue
         except Exception as e:
-            print(f"\n  {Colors.RED}✘ [WARN]{Colors.END} Failed to process card {current_card_index}: {e}")
-            current_card_index += 1
+            print(f"\n  {Colors.RED}✘ [WARN]{Colors.END} Failed to process card {card_id}: {e}")
             
     print(f"\n{Colors.GREEN}✔ [Page Summary]{Colors.END} Applied: {Colors.BOLD}{clicked_count}{Colors.END} | Skipped Senior: {Colors.BOLD}{skipped_count}{Colors.END}")
     return clicked_count
@@ -785,131 +732,31 @@ def get_url_for_keyword(base_url: str, keyword: str) -> str:
 
 def run_scraper():
     # 1. Load all configurations and credentials dynamically from local .env
-    load_env_configurations()
+    config, credentials = load_env_configurations()
     print_banner()
     
-    email = CATHO_EMAIL
-    password = CATHO_PASSWORD
-    
     # Prompt securely in the console if still default placeholders and not found in .env
-    if not TEST_MODE:
-        if email == "your_email@example.com" or not email:
+    if not config.TEST_MODE:
+        if credentials.email == "your_email@example.com" or not credentials.email:
             print(f"\n{Colors.BOLD}=== Catho Login Credentials ==={Colors.END}")
-            email = input("Enter your Catho Email/CPF: ").strip()
-        if password == "your_password" or not password:
-            password = getpass.getpass("Enter your Catho Password (secure input, hidden): ")
+            credentials.email = input("Enter your Catho Email/CPF: ").strip()
+        if credentials.password == "your_password" or not credentials.password:
+            credentials.password = getpass.getpass("Enter your Catho Password (secure input, hidden): ")
             
-    credentials = UserCredentials(email=email, password=password)
-    
-    driver = setup_driver(headless=False)
+    driver = setup_driver(config, headless=False)
     
     try:
-        if TEST_MODE:
-            print(f"\n{Colors.HEADER}{Colors.BOLD}⚙️ [[ TEST MODE ACTIVE ]]{Colors.END}")
-            print(f"{Colors.CYAN}➤ 1.{Colors.END} Opening Chromium to the default start page/new tab...")
-            time.sleep(2.0)
-            
-            print(f"{Colors.CYAN}➤ 2.{Colors.END} Locating the Catho shortcut link on Chromium home page...")
-            catho_link = None
-            
-            # Since standard chrome://newtab uses Shadow DOM,search via standard DOM selectors first
-            catho_link_selectors = [
-                (By.CSS_SELECTOR, "a[aria-label='Catho']"),
-                (By.XPATH, "//a[contains(@href, 'vagas/programador')]"),
-                (By.CSS_SELECTOR, "a[href*='catho.com.br']")
-            ]
-            
-            for by, selector in catho_link_selectors:
-                try:
-                    catho_link = WebDriverWait(driver, 4).until(
-                        EC.element_to_be_clickable((by, selector))
-                    )
-                    break
-                except Exception:
-                    continue
-            
-            # If not directly in global DOM, deep recursive Shadow DOM via JS
-            if not catho_link:
-                try:
-                    catho_link = driver.execute_script("""
-                        function findInShadows(root, selector) {
-                            if (!root) return null;
-                            const el = root.querySelector(selector);
-                            if (el) return el;
-                            const shadowHosts = root.querySelectorAll('*');
-                            for (const host of shadowHosts) {
-                                if (host.shadowRoot) {
-                                    const found = findInShadows(host.shadowRoot, selector);
-                                    if (found) return found;
-                                }
-                            }
-                            return null;
-                        }
-                        return findInShadows(document, "a[aria-label='Catho']") || 
-                               findInShadows(document, "a[href*='catho.com.br']");
-                    """)
-                except Exception:
-                    pass
-            
-            clicked_shortcut = False
-            if catho_link:
-                print(f"  {Colors.GREEN}✔{Colors.END} Found Catho shortcut button on starting page!")
-                delay = random.uniform(1.8, 3.2)
-                print(f"  {Colors.BLUE}⏳ [HUMAN DELAY]{Colors.END} Waiting {Colors.BOLD}{delay:.2f}{Colors.END} seconds to simulate natural interaction...")
-                time.sleep(delay)
-                highlight_element(driver, catho_link, color="#ff4393")
-                
-                try:
-                    catho_link.click()
-                    clicked_shortcut = True
-                except Exception:
-                    try:
-                        driver.execute_script("arguments[0].click();", catho_link)
-                        clicked_shortcut = True
-                    except Exception as e:
-                        print(f"  {Colors.YELLOW}⚠ [WARN]{Colors.END} Failed to click shortcut: {e}")
-                    
-                if clicked_shortcut:
-                    print(f"  {Colors.GREEN}✔ [CLICK]{Colors.END} Successfully clicked the Catho shortcut button!")
-                    
-                    if pyautogui:
-                        pyautogui_delay = random.uniform(1.0, 2.0)
-                        print(f"  {Colors.BLUE}⏳ [PyAutoGUI]{Colors.END} Waiting {Colors.BOLD}{pyautogui_delay:.2f}{Colors.END} seconds before pressing ESC...")
-                        time.sleep(pyautogui_delay)
-                        
-                        esc_presses = random.randint(3, 7)
-                        print(f"  {Colors.BLUE}⌨ [PyAutoGUI]{Colors.END} Pressing ESC key {Colors.BOLD}{esc_presses}{Colors.END} times to dismiss initial focus/popovers...")
-                        for p in range(1, esc_presses + 1):
-                            pyautogui.press('esc')
-                            time.sleep(0.15)
-                        print(f"  {Colors.GREEN}✔ [PyAutoGUI]{Colors.END} ESC key presses completed successfully.")
-            
-            if not clicked_shortcut:
-                print(f"  {Colors.YELLOW}⚠ [WARN]{Colors.END} Catho shortcut link not found in Chromium startup screen. Will navigate directly to search URLs...")
-                time.sleep(1.5)
-            else:
-                print(f"{Colors.CYAN}➤ 3.{Colors.END} Waiting for redirection to the Catho jobs page...")
-                try:
-                    WebDriverWait(driver, 10).until(
-                        EC.url_contains("catho.com.br/vagas/programador")
-                    )
-                    print(f"  {Colors.GREEN}✔ [SUCCESS]{Colors.END} Landing page verified: {Colors.UNDERLINE}{driver.current_url}{Colors.END}")
-                except Exception:
-                    print(f"  {Colors.YELLOW}ℹ [INFO]{Colors.END} Redirection took longer or landed on: {Colors.UNDERLINE}{driver.current_url}{Colors.END}")
-                
-            print(f"{Colors.CYAN}➤ 4.{Colors.END} Redirection verified! Transitioning to the dynamic scraping loop...")
-            time.sleep(1.5)
-            
-        else:
-            # 3. Handle Production Login Step (Only in non-TEST_MODE)
-            login_to_catho(driver, credentials)
+        # Check login status and break if failed
+        if not login_to_catho(driver, credentials, config):
+            print(f"\n{Colors.RED}❌ [EXIT]{Colors.END} Login flow failed. Halting scraper to prevent loops on blank/login pages.")
+            return
             
         # ==========================================
         # WORKLIST LOOP
         # ==========================================
-        for keyword in KEYWORDS_WORKLIST:
+        for keyword in config.KEYWORDS_WORKLIST:
             formatted_keyword = keyword.lower().replace(" ", "-")
-            target_url = get_url_for_keyword(REAL_BASE_URL, keyword)
+            target_url = get_url_for_keyword(config.REAL_BASE_URL, keyword)
             
             print(f"\n{Colors.CYAN}{Colors.BOLD}{'='*60}\n📋 STARTING SCRAPING FOR KEYWORD: {Colors.YELLOW}{keyword.upper()}{Colors.CYAN}\n{'='*60}{Colors.END}")
             print(f"{Colors.BLUE}🎯 Target URL:{Colors.END} {Colors.UNDERLINE}{target_url}{Colors.END}")
@@ -925,17 +772,17 @@ def run_scraper():
                 time.sleep(2.5)
                 
             current_page = 1
-            while current_page <= MAX_PAGES_TO_SCRAPE:
+            while current_page <= config.MAX_PAGES_TO_SCRAPE:
                 print(f"\n{Colors.HEADER}{Colors.BOLD}{'-'*50}\n📄 SCRAPING {keyword.upper()} - PAGE {current_page}\n{'-'*50}{Colors.END}")            
-                clicked_count = process_page_buttons(driver)
+                clicked_count = process_page_buttons(driver, config)
                 
                 # If we applied to 0 jobs, we either hit already applied ones or there are no more jobs for this keyword.
                 if clicked_count == 0:
                     print(f"\n{Colors.YELLOW}📋 [Worklist]{Colors.END} Found 0 application buttons on page {current_page} for '{keyword}'. Moving to next keyword in worklist...")
                     break
                     
-                if current_page >= MAX_PAGES_TO_SCRAPE:
-                    print(f"\n{Colors.GREEN}📋 [Worklist]{Colors.END} Reached the cap of {Colors.BOLD}{MAX_PAGES_TO_SCRAPE}{Colors.END} pages for '{keyword}'.")
+                if current_page >= config.MAX_PAGES_TO_SCRAPE:
+                    print(f"\n{Colors.GREEN}📋 [Worklist]{Colors.END} Reached the cap of {Colors.BOLD}{config.MAX_PAGES_TO_SCRAPE}{Colors.END} pages for '{keyword}'.")
                     break
                     
                 print(f"\n{Colors.BLUE}📄 [Pagination]{Colors.END} Preparing to move to Page {current_page + 1}...")
@@ -963,8 +810,7 @@ def run_scraper():
                 if next_button:
                     try:
                         print(f"  {Colors.GREEN}✔{Colors.END} Found 'Próxima' pagination button. Clicking...")
-                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", next_button)
-                        time.sleep(0.5)
+                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'auto', block: 'center'});", next_button)
                         next_button.click()
                         current_page += 1
                         time.sleep(random.uniform(2.0, 4.0))
@@ -973,8 +819,11 @@ def run_scraper():
                         next_button = None
                 
                 if not next_button:
-                    connector = "&" if "?" in target_url else "?"
-                    next_page_url = f"{target_url}{connector}page={current_page + 1}"
+                    parsed_url = urlparse(target_url)
+                    query_params = parse_qs(parsed_url.query)
+                    query_params["page"] = [str(current_page + 1)]
+                    new_query = urlencode(query_params, doseq=True)
+                    next_page_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.params, new_query, parsed_url.fragment))
                     print(f"  {Colors.CYAN}➤{Colors.END} Pagination button not clickable/found. Navigating directly to URL: {Colors.UNDERLINE}{next_page_url}{Colors.END}")
                     driver.get(next_page_url)
                     current_page += 1
@@ -982,6 +831,8 @@ def run_scraper():
 
     except Exception as e:
         print(f"\n{Colors.RED}❌ [CRITICAL ERROR]{Colors.END} Scraper execution halted: {e}")
+        if config.VERBOSE:
+            traceback.print_exc()
         
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}🛑 [KeyboardInterrupt]{Colors.END} Scraper execution interrupted by user.")
@@ -991,6 +842,8 @@ def run_scraper():
         print(f"\n{Colors.GREEN}🏁 All tasks completed.{Colors.END} Closing browser window...")
         driver.quit()
 
+
+
+
 if __name__ == "__main__":
     run_scraper()
-    

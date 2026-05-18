@@ -9,6 +9,8 @@ ENV/
 # Chrome Session User Data (Protects private login sessions, cookies & caches)
 src/
 Default/
+bot_profile/
+
 
 # Python caching and compiled bytecodes
 __pycache__/
