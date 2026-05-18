@@ -50,7 +50,7 @@ sudo pacman -S ydotool
 ### 3. Customize Configurations
 Open **[.env](file:///.env)** and configure your target search URL, pagination caps, and credentials:
 ```ini
-email=lucas.lucachak9@gmail.com
+email=[EMAIL_ADDRESS]
 passwd=YourSecurePassword123!
 
 # --- SCRAPER CONFIGURATIONS ---
