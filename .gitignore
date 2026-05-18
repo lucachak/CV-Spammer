@@ -1,0 +1,22 @@
+# Python Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Private credentials & behaviors configurations
+.env
+
+# Chrome Session User Data (Protects private login sessions, cookies & caches)
+src/
+Default/
+
+# Python caching and compiled bytecodes
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS / Temporary local file logs
+.DS_Store
+Thumbs.db
+*.log
+EOT
