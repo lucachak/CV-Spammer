@@ -1,16 +1,16 @@
-import os
-import sys
-import re
-import time
-import random
 import getpass
-import platform
 import glob
+import os
+import platform
+import random
+import re
+import sys
+import time
 import traceback
-from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
-
 # Modern Python (3.12+) compatibility patch for undetected_chromedriver
 import types
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
 try:
     import distutils.version
 except ImportError:
@@ -53,26 +53,28 @@ except ImportError:
 
 # pyrefly: ignore [missing-import]
 from dataclasses import dataclass, field
+
+# pyrefly: ignore [missing-import]
+import undetected_chromedriver as uc
 # pyrefly: ignore [missing-import]
 from selenium import webdriver
 # pyrefly: ignore [missing-import]
+from selenium.common.exceptions import StaleElementReferenceException
+# pyrefly: ignore [missing-import]
 from selenium.webdriver.chrome.options import Options as ChromeOptions
-# pyrefly: ignore [missing-import]
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-# pyrefly: ignore [missing-import]
-from selenium.webdriver.common.by import By
-# pyrefly: ignore [missing-import]
-from selenium.webdriver.support.ui import WebDriverWait
-# pyrefly: ignore [missing-import]
-from selenium.webdriver.support import expected_conditions as EC
 # pyrefly: ignore [missing-import]
 from selenium.webdriver.common.action_chains import ActionChains
 # pyrefly: ignore [missing-import]
-from selenium.common.exceptions import StaleElementReferenceException
+from selenium.webdriver.common.by import By
 # pyrefly: ignore [missing-import]
 from selenium.webdriver.common.keys import Keys
 # pyrefly: ignore [missing-import]
-import undetected_chromedriver as uc
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+# pyrefly: ignore [missing-import]
+from selenium.webdriver.support import expected_conditions as EC
+# pyrefly: ignore [missing-import]
+from selenium.webdriver.support.ui import WebDriverWait
+
 
 # ==========================================
 # BEAUTIFUL TERMINAL STYLING
@@ -192,8 +194,7 @@ def setup_driver(config: ScraperConfig, headless: bool = False):
     Elite browser initialization module using undetected_chromedriver.
     """
     workspace_dir = os.path.abspath(os.path.dirname(__file__))
-    bot_profile = os.path.join(workspace_dir, "src")
-    
+    bot_profile = os.path.join(workspace_dir, "bot_profile")
     try:
         chrome_options = uc.ChromeOptions()
         if headless:
@@ -210,6 +211,7 @@ def setup_driver(config: ScraperConfig, headless: bool = False):
         print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Starting undetected-chromedriver with profile: {Colors.DIM}{bot_profile}{Colors.END}")
         
         driver = uc.Chrome(
+            version_main=148,
             options=chrome_options,
             user_data_dir=bot_profile
         )
