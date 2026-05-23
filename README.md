@@ -1,21 +1,27 @@
-# 💎 Catho Invincible Stealth Scraper & Automated Apply
+# 🕷️ Arachne Multi-Platform Stealth Scraper & Automated Apply
 
-An industrial-grade, anti-bot-evading automated job candidate scraper designed specifically for **Catho**. Built using **Selenium 4 (Python)**, **Chrome DevTools Protocol (CDP) fakes**, and **PyAutoGUI keyboard engines**, this tool runs securely under Linux (X11 & Wayland) to process job applications dynamically across pages, bypassing translation popups, initial popups, "CV Sent" overlays, and "Killer Question" questionnaires completely!
+An industrial-grade, anti-bot-evading automated job application suite designed to execute seamless, high-volume job hunting across major platforms (**LinkedIn** and **Catho**). Powered by **Selenium 4**, **Undetected Chromedriver (UC)**, **Chrome DevTools Protocol (CDP) fakes**, and dynamic interaction heuristics.
+
+The system features **Arachne LinkedIn Easy Apply (Caminho da Raposa)**, which dynamically parses job application questions (inputs, textareas, radio buttons, checkboxes, and select dropdowns) and matches them intelligently using your local `Resume` object (`helpers/resume.py`) as a high-fidelity single source of truth.
 
 ---
 
-## ✨ Key Capabilities
+## ✨ Core Capabilities
 
-*   **📋 Sequential Keyword Worklist Queue**: Automates sequential job hunting by looping through keywords (e.g., `java`, `backend`, `programador junior`, etc.) defined in your `.env`. The script dynamically slugifies spaces into hyphens and navigates from one keyword to another when zero clickable buttons are left.
-*   **⏭️ Regular Expression Senior Skip Filter**: Scans each job card (`li[data-offer-item]`) and automatically skips positions containing senior indicators (`senior`, `sênior`, `sn`, `sr`). It uses case-insensitive regex word boundaries (`\b`) to guarantee **zero false positives** on regular words (like *desnudar* or *Israel*).
-*   **🤫 Compact Console TUI Mode**: Silences excessive logs (interactive delays, keyboard keypresses, popup closing attempts) into a streamlined, single-line dynamic console indicator:
-    `➤ Targeting: 'Analista Programador' (1/12)... ✔ [CLICK]`. 
-    Toggle `VERBOSE=true` in your `.env` at any time to re-enable full, high-fidelity debug details.
-*   **🛡️ Deep CDP Anti-Bot Evasions**: Forges the browser fingerprint at the engine layer. Overrides `navigator.webdriver`, builds an exact replica of the `window.chrome` object natively, injects a standard array length for `navigator.plugins`, fakes user languages, and masks virtualized GPU drivers by forcing WebGL vendor responses to `Intel Iris OpenGL Engine`.
-*   **🤖 Advanced Behavioral Evasion**: Bypasses interaction-tracking systems by leveraging Selenium's `ActionChains`. Before any job application, the cursor simulates a realistic human `mouseenter` -> `mousemove` -> hesitation delay (`0.1s` - `0.4s`) -> `click` sequence.
-*   **🧱 Stale Element Immunity**: Engineered to never crash on dynamic DOM repaints or unexpected popups. The primary execution sequence uses an index-based `while` loop that intercepts `StaleElementReferenceException` triggers silently and dynamically re-fetches the entire document tree to guarantee zero interruptions.
-*   **🌐 Cross-Platform Browser Resolution**: Dynamically maps native Chromium user-data profiles on both Linux (`~/.config/google-chrome`) and Windows (`%LOCALAPPDATA%\\Google\\Chrome\\User Data`). If Chromium initialization fails, it seamlessly degrades into a fully equipped Mozilla Firefox (Gecko) stealth fallback, loading native `*.default` profiles automatically.
-*   **🚨 Modal-Relative Popup Evasion**: Detects popups and consent dialogs strictly inside visible modal containers, avoiding standard search chip closer elements. If standard clicks are blocked, it executes native ESC keys, PyAutoGUI esc, or JS click injections to clear the screen instantly.
+### 🌐 1. LinkedIn "Easy Apply" Automation (Caminho da Raposa)
+*   **📋 Intelligent Form Auto-Filler**: Classifies forms inside LinkedIn modals on-the-fly into their exact field types (`TEXT_INPUT`, `SELECT_DROPDOWN`, `TEXTAREA`, `RADIO_GROUP`, `CHECKBOX`).
+*   **🧠 Resume-Driven Answers**: Automatically resolves complex form questions (languages, years of experience, tools, summaries) by matching questions to data fields defined in `helpers/resume.py`.
+*   **🔄 Anti-Overwriting Safety**: Detects fields already pre-filled by LinkedIn (such as email, country codes, or phone numbers) and skips them dynamically. This prevents breaking form validation and avoids infinite loops.
+*   **🎲 Conservative Fallbacks**: Injects smart fallback values (like conservative random years of experience or simulation flags) for fields not answered in your resume structure.
+
+### 💎 2. Catho Stealth Automation
+*   **⏭️ Senior Skip Regex Filter**: Scans job cards and skips positions containing senior indicators (`senior`, `sênior`, `sr`, `sn`) using boundary-safe regex to prevent false positives.
+*   **🚨 Modal-Relative Popup Evasion**: Detects and clears overlay popups, translation dialogs, and questionnaires seamlessly to prevent interaction blocking.
+
+### 🛡️ 3. Industrial Stealth Evasions
+*   **🤫 Silent Console TUI Mode**: Elegant colorized logging showing exact field classifications (e.g., `📝 [TEXT_INPUT]`, `🔽 [DROPDOWN]`) and resolution statuses.
+*   **🎭 Deep CDP Evasions**: Overrides standard `navigator.webdriver` variables, structures complete mock native `window.chrome` objects, injects standard plugins array lengths, and fakes user-agent and GPU vendor profiles.
+*   **🤖 Human-Like ActionChains**: Emulates organic mouse cursors with realistic coordinate targeting, randomized hover pauses (`0.5s` - `3s`), and variable keyboard delays.
 
 ---
 
@@ -23,11 +29,25 @@ An industrial-grade, anti-bot-evading automated job candidate scraper designed s
 
 ```text
 .
-├── click_button.py        # Main execution scraper and automated candidate engine
-├── .env                  # External configuration variables (Credentials, modes, limits)
-├── requirements.txt      # Required Python dependencies
-├── setup.sh              # Automated bash installer (Creates virtual env, configures display)
-└── README.md             # Complete project guide and reference documentation
+├── Driver.py                   # Central orchestrator CLI (Entrypoint)
+├── .env                        # Configuration secrets, worklist keywords & credentials
+├── requirements.txt            # Python dependencies (undetected-chromedriver, selenium, etc.)
+├── setup.sh                    # Automated system setup & environment configurer
+├── persona.md                  # Project design philosophy & persona definitions (git-ignored)
+│
+├── components/
+│   ├── __init__.py
+│   ├── browser_engine.py       # Chrome profile settings & CDP stealth injects
+│   ├── config_loader.py        # Safe parser for overrideable config environment files
+│   ├── linkedin_scraper.py     # LinkedIn Easy Apply logic & Modal answering
+│   ├── catho_scraper.py        # Catho stealth scraper engine
+│   ├── launch_browser.py       # Helper to run browser with active profile
+│   └── search_builder.py       # Formats and safely encodes job search target URLs
+│
+└── helpers/
+    ├── __init__.py
+    ├── resume.py               # Single Source of Truth containing your career data (git-ignored)
+    └── [utilities]             # Custom DOM parsers, screenshots, cookie checkers & tests
 ```
 
 ---
@@ -35,75 +55,72 @@ An industrial-grade, anti-bot-evading automated job candidate scraper designed s
 ## ⚡ Installation & Quick Start
 
 ### 1. Execute the Installer
-Run the automated `setup.sh` script to set up your virtual environment, update dependencies, and configure environment templates:
+Set up the automated virtual environment, prepare python dependencies, and build the template configuration:
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-### 2. Configure PyAutoGUI Display Permissions (Linux)
-Since PyAutoGUI interacts with the physical keyboard, Linux display servers (X11/Wayland) require authorization permissions:
-```bash
-# Export active display session authority
-export XAUTHORITY=~/.Xauthority
-touch ~/.Xauthority
-
-# For Wayland environments, ensure utility is installed:
-sudo pacman -S ydotool
-```
-
-### 3. Customize Configurations
-Open **[.env](.env)** and configure your credentials, target keywords, sênior filters, and console verbosity:
+### 2. Configure Environment Options
+Open the newly generated `.env` file on your workspace and fill in your credentials:
 ```ini
-email=lucas.example@gmail.com
-passwd=YourSecurePassword123!
+email=your_catho_email@example.com
+passwd=your_catho_password
+linkedin_passwd=your_linkedin_password
 
-# --- SCRAPER CONFIGURATIONS ---
-# Set to true to run visual tests via shortcut buttons, false to run production-apply
-TEST_MODE=true
-
-# URL of the job search page to crawl
-REAL_BASE_URL=https://www.catho.com.br/vagas/programador-python/sao-paulo-sp/?order=dataAtualizacao
-
-# Maximum number of pagination pages to crawl
-MAX_PAGES_TO_SCRAPE=50
-
-# Human interaction delay range (seconds) between applications
+# --- CONFIGURATIONS ---
+KEYWORDS_WORKLIST=python, backend, django, devops, estagio
 MIN_DELAY=1.5
-MAX_DELAY=3.0
-
-# Comma-separated list of job titles/keywords to crawl sequentially
-KEYWORDS_WORKLIST=programador-python, java, backend, programador junior, programador jr, estagio
-
-# Comma-separated list of keywords to identify senior roles to skip (case-insensitive)
-SENIOR_TERMS=senior, sênior, sn, sr
-
-# Verbosity of terminal output (true for full logs, false for elegant compact mode)
+MAX_DELAY=3.5
 VERBOSE=false
 ```
 
+### 3. Setup Your Resume Truth (`helpers/resume.py`)
+This file is kept out of Git versioning for your privacy. Define your skills, languages, experience metrics, and career summaries inside this file to feed the automated LinkedIn parser.
+
 ---
 
-## 🚀 Execution
+## 🚀 Execution & Command Reference
 
-To execute the scraper in your current setup, run the main Python script:
+Arachne is orchestrated through a central, unified CLI. Execute the commands using the virtual environment:
+
+### Run LinkedIn Scraper
+Processes job pages sequentially, detects "Easy Apply" buttons, and fills form inputs dynamically:
 ```bash
-./.venv/bin/python click_button.py
+source .venv/bin/activate
+python3 Driver.py scrape_linkedin
 ```
 
-### 📌 Executing Modes:
-*   **`TEST_MODE=true` (Recommended First Run)**: Opens Chromium's start tab page, locates and clicks the Catho shortcut button, executes PyAutoGUI `ESC` key presses, transitions into the target search URL page 1, and runs candidate clicks with popup-clearing routines in simulated/test mode.
-*   **`TEST_MODE=false` (Production Mode)**: Connects directly, logs in automatically using credentials if a profile session is not active, navigates sequentially through your `KEYWORDS_WORKLIST`, and clicks buttons continuously across pages.
+### Run Catho Scraper
+Launches the stealth engine targeting job boards on Catho:
+```bash
+source .venv/bin/activate
+python3 Driver.py scrape_catho
+```
+
+### Launch Validating Browser
+Opens a Chromium window loaded with your persistent local user profile. Use this command to log in manually, complete one-time 2FA challenges, or verify cookies:
+```bash
+source .venv/bin/activate
+python3 Driver.py launch_browser
+```
+
+### Test Generators
+Verify that target search parameters are compiled correctly:
+```bash
+source .venv/bin/activate
+python3 Driver.py test url
+```
 
 ---
 
-## 🛡️ Stealth Safety Advice
+## 🛡️ Operational Safeguards
 
 > [!TIP]
-> Keep `MIN_DELAY` and `MAX_DELAY` above `1.5` seconds to maintain human-like navigation behavior.
+> Keep `MIN_DELAY` above `1.5` seconds and `MAX_DELAY` above `3.5` seconds to prevent rate-limiting triggers and maintain human-like behavior.
 
 > [!IMPORTANT]
-> To prevent Google profile locking warnings, ensure that no other instances of the Chromium `Default` folder are running elsewhere before launching the script.
+> Always run `python3 Driver.py launch_browser` first if it is your first time or if you get a session challenge. Complete the manual verification or log in, then close the browser completely before running the headless/automatic scraper.
 
-> [!NOTE]
-> Use `Ctrl + C` in the executing terminal to gracefully trigger `KeyboardInterrupt` and exit the program cleanly.
+> [!WARNING]
+> Do not leave another window of your local Chrome user profile open while running the script, as Chrome locks directories to single-process accesses.
