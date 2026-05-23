@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import re
+import random
 import traceback
 import types
 
@@ -109,7 +110,9 @@ def setup_driver(config: ScraperConfig, headless: bool = False):
             chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--window-size=1280,800")
+        # Resolução aleatória real — '1280x800' é fingerprint clássico de bot
+        _window_sizes = ["1920,1080", "1536,864", "1440,900", "1366,768", "1280,1024"]
+        chrome_options.add_argument(f"--window-size={random.choice(_window_sizes)}")
         
         chrome_options.add_experimental_option("prefs", {
             "credentials_enable_service": False,
@@ -126,6 +129,48 @@ def setup_driver(config: ScraperConfig, headless: bool = False):
             options=chrome_options,
             user_data_dir=bot_profile
         )
+
+        # ── CDP Stealth: corrige lacunas que o UC não tapa por padrão ──
+        # Injetado antes de qualquer página carregar via Page.addScriptToEvaluateOnNewDocument
+        _stealth_js = """
+            // 1. navigator.plugins: lista vazia é sinal claro de headless/bot
+            (function() {
+                const pluginData = [
+                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+                ];
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => {
+                        const arr = pluginData.map(p => { const o = Object.create(Plugin.prototype); return Object.assign(o, p); });
+                        arr.__proto__ = PluginArray.prototype;
+                        return arr;
+                    },
+                    configurable: true
+                });
+            })();
+
+            // 2. navigator.permissions: headless retorna 'denied' para 'notifications' — detectável
+            (function() {
+                const _orig = window.navigator.permissions.query.bind(navigator.permissions);
+                window.navigator.permissions.query = (params) =>
+                    params.name === 'notifications'
+                        ? Promise.resolve({ state: Notification.permission || 'default' })
+                        : _orig(params);
+            })();
+
+            // 3. document.hidden/visibilityState: garante que a aba parece visível
+            Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+            Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+
+            // 4. Remove rastros de webdriver em propriedades menos conhecidas
+            delete window.navigator.__proto__.webdriver;
+        """
+        try:
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": _stealth_js})
+        except Exception:
+            pass  # UC pode já ter aplicado alguns patches; falha silenciosa é segura
+
         return driver
         
     except Exception as chrome_err:
@@ -135,13 +180,19 @@ def setup_driver(config: ScraperConfig, headless: bool = False):
         raise
 
 def highlight_element(driver, element, config: ScraperConfig, color="#ff4393"):
+    """
+    Debug visual. Em produção (VERBOSE=false) é completamente silenciado:
+    injeção CSS via JS dispara MutationObserver — detectável pelo LinkedIn.
+    """
+    if not getattr(config, 'VERBOSE', False):
+        return  # Silencia em produção — zero mutação DOM
     try:
         original_style = element.get_attribute("style")
         driver.execute_script(
-            f"arguments[0].setAttribute('style', 'border: 3px dashed {color} !important; box-shadow: 0 0 10px {color} !important;');", 
+            f"arguments[0].setAttribute('style', 'border: 3px dashed {color} !important; box-shadow: 0 0 10px {color} !important;');",
             element
         )
-        time.sleep(0.8) 
+        time.sleep(0.4)
         driver.execute_script("arguments[0].setAttribute('style', arguments[1]);", element, original_style)
     except Exception:
         if config.VERBOSE:

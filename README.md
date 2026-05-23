@@ -44,10 +44,11 @@ The system features **Arachne LinkedIn Easy Apply (Caminho da Raposa)**, which d
 │   ├── launch_browser.py       # Helper to run browser with active profile
 │   └── search_builder.py       # Formats and safely encodes job search target URLs
 │
-└── helpers/
-    ├── __init__.py
-    ├── resume.py               # Single Source of Truth containing your career data (git-ignored)
-    └── [utilities]             # Custom DOM parsers, screenshots, cookie checkers & tests
+├── helpers/
+│   ├── __init__.py
+│   ├── resume.template.py      # Template file containing career metrics and data structure
+│   ├── resume.py               # Single Source of Truth with your actual career data (git-ignored)
+│   └── [utilities]             # Custom DOM parsers, screenshots, cookie checkers & tests
 ```
 
 ---
@@ -76,7 +77,13 @@ VERBOSE=false
 ```
 
 ### 3. Setup Your Resume Truth (`helpers/resume.py`)
-This file is kept out of Git versioning for your privacy. Define your skills, languages, experience metrics, and career summaries inside this file to feed the automated LinkedIn parser.
+Because your career details are private, `helpers/resume.py` is ignored by Git. 
+
+To configure it, copy the template and customize your professional details:
+```bash
+cp helpers/resume.template.py helpers/resume.py
+```
+Open the new `helpers/resume.py` file and define your skills, languages, experience metrics, and career summaries inside this file to feed the automated LinkedIn parser.
 
 ---
 

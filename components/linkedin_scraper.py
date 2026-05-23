@@ -17,6 +17,20 @@ from helpers.resume import meu_curriculo
 
 
 # ==========================================
+# HUMAN BEHAVIOR UTILITIES
+# ==========================================
+
+def gaussian_delay(center_s: float, sigma_s: float = 0.35, min_s: float = 0.2):
+    """
+    Delay com distribuição gaussiana — indistinguível de padrão humano real.
+    random.uniform() produz distribuição uniforme detectada por análise estatística.
+    Humanos seguem curva gaussiana com cauda longa (diståncias, leituras, distrações).
+    """
+    delay = max(min_s, random.gauss(center_s, sigma_s))
+    time.sleep(delay)
+
+
+# ==========================================
 # FIELD TYPE CLASSIFIER
 # ==========================================
 
@@ -223,6 +237,76 @@ class LinkedInScraper:
         return None
 
     @staticmethod
+    def _human_click(driver, element) -> bool:
+        """
+        Clique humanizado com trajetória de aproximação e jitter.
+
+        O problema de execute_script('click'): dispara MouseEvent com clientX=0, clientY=0
+        — coordenadas impossíveis para um humano. LinkedIn e outros sistemas anti-bot
+        monitoram esses valores via event listeners nativos.
+
+        Esta função usa ActionChains nativo que gera eventos reais com coordenadas válidas:
+          1. Fase Abordagem: move o cursor para perto do elemento (simula chegada do mouse)
+          2. Fase Refinamento: micro-ajustes incrementais até o ponto de clique
+          3. Fase Clique: hesitação final + clique nativo (MouseEvent com clientX/Y reais)
+        """
+        try:
+            # Jitter: humanos nunca acertam o centro exato de um botão
+            jitter_x = random.uniform(-5, 5)
+            jitter_y = random.uniform(-3, 3)
+
+            actions = ActionChains(driver)
+
+            # Fase 1: Abordagem — cursor chega de uma posição aleatória próxima ao elemento
+            approach_x = random.uniform(-55, 55)
+            approach_y = random.uniform(-35, 35)
+            actions.move_to_element_with_offset(element, approach_x, approach_y)
+            actions.pause(random.uniform(0.06, 0.16))
+
+            # Fase 2: Refinamento — micro-ajuste incremental em direção ao alvo real
+            steps = random.randint(3, 5)
+            dx = (jitter_x - approach_x) / steps
+            dy = (jitter_y - approach_y) / steps
+            for _ in range(steps):
+                actions.move_by_offset(
+                    dx + random.uniform(-0.8, 0.8),
+                    dy + random.uniform(-0.5, 0.5)
+                )
+                actions.pause(random.uniform(0.01, 0.03))
+
+            # Fase 3: Hesitação pré-clique + clique nativo (gera MouseEvent real)
+            actions.pause(random.uniform(0.09, 0.22))
+            actions.click()
+            actions.perform()
+            return True
+        except Exception:
+            # Fallback seguro caso o ActionChains falhe (elemento fora de tela, etc.)
+            try:
+                driver.execute_script("arguments[0].click();", element)
+            except Exception:
+                pass
+            return False
+
+    @staticmethod
+    def _micro_wander(driver, intensity: int = 2):
+        """
+        Move o mouse levemente durante esperas longas.
+        Simula o usuário olhando para a tela enquanto aguarda carregamento.
+        Sem isso, o cursor fica completamente parado — padrão não-humano.
+        """
+        try:
+            actions = ActionChains(driver)
+            for _ in range(intensity):
+                actions.move_by_offset(
+                    random.randint(-18, 18),
+                    random.randint(-12, 12)
+                )
+                actions.pause(random.uniform(0.25, 0.7))
+            actions.perform()
+        except Exception:
+            pass  # Falha silenciosa — micro-wander não pode derrubar o loop principal
+
+    @staticmethod
     def _select_best_option(select: Select, preferred: str | None) -> bool:
         """
         Seleciona a melhor opção num <select> dado um valor preferido.
@@ -307,7 +391,17 @@ class LinkedInScraper:
                 if resolved:
                     print(f"          {Colors.GREEN}📋 [Resume]{Colors.END} Resposta resolvida: '{resolved[:40]}'")
 
-                # ── 3. Dispatch por tipo ──
+                # ── 3. Delay contextual por tipo — humanos demoram mais em campos complexos ──
+                _field_timing = {
+                    FieldType.TEXT_INPUT:      (0.7, 0.25),
+                    FieldType.SELECT_DROPDOWN: (1.1, 0.35),
+                    FieldType.TEXTAREA:        (2.3, 0.7),   # precisa "ler e pensar"
+                    FieldType.RADIO_GROUP:     (1.4, 0.45),
+                    FieldType.CHECKBOX:        (0.8, 0.25),
+                    FieldType.UNKNOWN:         (0.5, 0.15),
+                }
+                _center, _sigma = _field_timing.get(field_type, (0.7, 0.25))
+                gaussian_delay(_center, _sigma, min_s=0.3)
 
                 # TEXT_INPUT
                 if field_type == FieldType.TEXT_INPUT:
@@ -377,7 +471,7 @@ class LinkedInScraper:
                                     r_label = modal.find_element(By.CSS_SELECTOR, f"label[for='{r_id}']")
                                     r_text = r_label.text.strip().lower()
                                     if res_lower in r_text or r_text in res_lower:
-                                        driver.execute_script("arguments[0].click();", r)
+                                        LinkedInScraper._human_click(driver, r)
                                         print(f"          {Colors.HEADER}↳ Radio selecionado (resume):{Colors.END} '{r_label.text.strip()}'")
                                         selected = True
                                         break
@@ -390,14 +484,14 @@ class LinkedInScraper:
                                 try:
                                     r_label = modal.find_element(By.CSS_SELECTOR, f"label[for='{r_id}']")
                                     if r_label.text.strip().lower() in ("sim", "yes", "true"):
-                                        driver.execute_script("arguments[0].click();", r)
+                                        LinkedInScraper._human_click(driver, r)
                                         print(f"          {Colors.HEADER}↳ Radio selecionado (sim/yes):{Colors.END} '{r_label.text.strip()}'")
                                         selected = True
                                         break
                                 except Exception:
                                     pass
                         if not selected and all_radios:
-                            driver.execute_script("arguments[0].click();", all_radios[0])
+                            LinkedInScraper._human_click(driver, all_radios[0])
                             print(f"          {Colors.HEADER}↳ Radio selecionado (fallback index 0){Colors.END}")
                     except Exception:
                         pass
@@ -406,7 +500,7 @@ class LinkedInScraper:
                 elif field_type == FieldType.CHECKBOX:
                     try:
                         if not elem.is_selected():
-                            driver.execute_script("arguments[0].click();", elem)
+                            LinkedInScraper._human_click(driver, elem)
                             print(f"          {Colors.GREEN}↳ Checkbox marcado.{Colors.END}")
                     except Exception:
                         pass
@@ -421,8 +515,10 @@ class LinkedInScraper:
     @staticmethod
     def scrape_linkedin():
         def human_delay(min_s=1.5, max_s=3.5):
-            """Adds a random delay to simulate human behavior."""
-            time.sleep(random.uniform(min_s, max_s))
+            """Converte a assinatura min/max antiga para gaussian_delay — distribuição realista."""
+            center = (min_s + max_s) / 2
+            sigma  = (max_s - min_s) / 4
+            gaussian_delay(center, sigma, min_s=min_s * 0.6)
 
         print(f"{Colors.GREEN}{Colors.BOLD}[Arachne LinkedIn Scraper]{Colors.END} Operação 'Caminho da Raposa' Iniciada.")
         conf, credentials = load_env_configurations()
@@ -501,10 +597,18 @@ class LinkedInScraper:
                             break
                             
                         card = current_cards[index]
-                        
-                        # Scroll usando JavaScript (invisível e direto ao ponto)
+
+                        # Skip probabilístico leve (~12%) — humanos não clicam em tudo que veem
+                        if random.random() < 0.12:
+                            print(f"    {Colors.DIM}- [{index + 1}/{total_items}] [passando] Título ignorado naturalmente.{Colors.END}")
+                            gaussian_delay(0.4, 0.15, min_s=0.2)
+                            continue
+
+                        # Scroll suave até o card
                         driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", card)
-                        human_delay(0.5, 1.2)
+                        # Pausa de "leitura" — tempo variável como usuário lendo título e empresa
+                        gaussian_delay(1.0, 0.45, min_s=0.5)
+                        LinkedInScraper._micro_wander(driver, intensity=1)
                         
                         # Buscando o link exato da vaga, não a adivinhação de <ul> <li> <a> <span>
                         title_link = None
@@ -536,29 +640,22 @@ class LinkedInScraper:
 
                         title = title_link.text.strip() or "Vaga sem título"
                         print(f"    {Colors.DIM}- [{index + 1}/{total_items}]{Colors.END} Acessando: {Colors.BOLD}{title}{Colors.END}")
+
+                        # _human_click gera MouseEvent real (clientX/Y válidos) — sem JS inject
+                        LinkedInScraper._human_click(driver, title_link)
                         
-                        # Usando ActionChains em vez de JS puro para evitar que o React faça hard-reload da página inteira
-                        # O clique nativo garante que o LinkedIn apenas abra o painel da direita sem sair da lista
-                        try:
-                            actions = ActionChains(driver)
-                            actions.move_to_element(title_link).pause(0.3).click().perform()
-                        except Exception:
-                            # Fallback caso o título esteja coberto
-                            driver.execute_script("arguments[0].click();", title_link)
-                        
-                        # Tempo realista pro painel da direita carregar a vaga 
-                        human_delay(2.0, 3.5)
+                        # Tempo realista + micro-wander enquanto o painel da direita carrega
+                        gaussian_delay(2.5, 0.6, min_s=1.8)
+                        LinkedInScraper._micro_wander(driver, intensity=2)
                         
                         # Procurar botão Easy Apply (Candidatura Simplificada) no painel direito
                         try:
                             right_pane = driver.find_element(By.CSS_SELECTOR, ".jobs-search__job-details--container, .job-view-layout, .jobs-details")
-                            
-                            # Busca por div contendo a classe jobs-apply e o botão interno
                             apply_button = right_pane.find_element(By.CSS_SELECTOR, "div[class*='jobs-apply'] button, button.jobs-apply-button")
-                            
+
                             print(f"      {Colors.GREEN}🎯 Achou botão Easy Apply! Clicando...{Colors.END}")
-                            highlight_element(driver, apply_button, conf, color="#25D366")
-                            driver.execute_script("arguments[0].click();", apply_button)
+                            gaussian_delay(0.6, 0.2, min_s=0.3)  # hesitação pré-clique
+                            LinkedInScraper._human_click(driver, apply_button)
                             
                             human_delay(1.5, 2.5)
                             
@@ -581,7 +678,8 @@ class LinkedInScraper:
                                     pass
                                     
                                 human_delay(1.0, 2.0)
-                                
+                                LinkedInScraper._micro_wander(driver, intensity=1)  # cursor se move enquanto lê o painel
+
                                 # Aciona a heurística de preenchimento autônomo
                                 LinkedInScraper.answer_modal_questions(driver, modal, conf)
                                 
@@ -594,12 +692,11 @@ class LinkedInScraper:
                                     for btn in primary_buttons:
                                         btn_text = btn.text.strip().lower()
                                         if any(word in btn_text for word in ["next", "avançar", "continue", "continuar", "review", "revisar"]):
-                                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", btn)
-                                            human_delay(0.5, 1.0)
+                                            gaussian_delay(0.8, 0.3, min_s=0.4)  # hesitação pré-clique no Next
                                             print(f"        {Colors.DIM}Clicando em '{btn.text.strip()}'...{Colors.END}")
-                                            driver.execute_script("arguments[0].click();", btn)
+                                            LinkedInScraper._human_click(driver, btn)
                                             clicked = True
-                                            human_delay(1.5, 2.5)
+                                            gaussian_delay(1.8, 0.5, min_s=1.2)  # aguarda painel seguinte carregar
                                             break
                                         elif any(word in btn_text for word in ["submit", "enviar"]):
                                             # Se for o botão final, não vamos submeter para evitar spam real durante testes,
@@ -614,13 +711,13 @@ class LinkedInScraper:
                                         # nós fechamos o modal para ir para a próxima vaga.
                                         print(f"        {Colors.YELLOW}⚠️ Requer intervenção manual ou chegamos no fim. Descartando candidatura para seguir com o loop.{Colors.END}")
                                         close_modal_btn = modal.find_element(By.CSS_SELECTOR, "button[data-test-modal-close-btn], button[aria-label*='Dismiss'], button[aria-label*='Fechar']")
-                                        driver.execute_script("arguments[0].click();", close_modal_btn)
-                                        
+                                        LinkedInScraper._human_click(driver, close_modal_btn)
+
                                         # LinkedIn às vezes pede confirmação de descarte: "Discard application?"
-                                        human_delay(1.0, 1.5)
+                                        gaussian_delay(1.2, 0.3, min_s=0.8)
                                         try:
                                             discard_btn = driver.find_element(By.CSS_SELECTOR, "button[data-control-name='discard_application_confirm_btn'], button[data-test-dialog-primary-btn]")
-                                            driver.execute_script("arguments[0].click();", discard_btn)
+                                            LinkedInScraper._human_click(driver, discard_btn)
                                             print(f"        {Colors.DIM}Descarte confirmado.{Colors.END}")
                                         except Exception:
                                             pass
