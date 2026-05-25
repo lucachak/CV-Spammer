@@ -1,4 +1,5 @@
 import time
+import re
 import random
 import traceback
 from enum import Enum
@@ -23,6 +24,13 @@ from helpers.resume import meu_curriculo
 def gaussian_delay(center_s: float, sigma_s: float = 0.35, min_s: float = 0.2):
     delay = max(min_s, random.gauss(center_s, sigma_s))
     time.sleep(delay)
+
+
+def block_pause():
+    duration = max(300, random.gauss(600, 120))
+    mins = duration / 60
+    print(f"\n  {Colors.YELLOW}[block_pause]{Colors.END} Pausa de {mins:.1f} min antes do proximo bloco...")
+    time.sleep(duration)
 
 
 class FieldType(Enum):
@@ -432,25 +440,54 @@ class LinkedInScraper:
             print(f"        {Colors.RED}❌ [answer_modal_questions]{Colors.END} Erro inesperado: {e}")
 
     @staticmethod
-    def scrape_linkedin():
+    def scrape_linkedin(debug_mode: bool = False):
+        import datetime
+        import os as _os
+
         def human_delay(min_s=1.5, max_s=3.5):
-            """Converte a assinatura min/max antiga para gaussian_delay — distribuição realista."""
+            """Converte a assinatura min/max antiga para gaussian_delay."""
             center = (min_s + max_s) / 2
             sigma  = (max_s - min_s) / 4
             gaussian_delay(center, sigma, min_s=min_s * 0.6)
 
-        print(f"{Colors.GREEN}{Colors.BOLD}[Arachne LinkedIn Scraper]{Colors.END} Operação 'Caminho da Raposa' Iniciada.")
+        def log_session(applications_sent: int):
+            log_path = _os.path.join(
+                _os.path.dirname(_os.path.abspath(_os.path.dirname(__file__))),
+                "session_log.txt"
+            )
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] Sessao encerrada | Aplicacoes enviadas: {applications_sent}\n")
+            print(f"\n  {Colors.DIM}[SessionLog]{Colors.END} Sessao registrada em session_log.txt ({applications_sent} aplicacoes)")
+
+        print(f"{Colors.GREEN}{Colors.BOLD}[Arachne LinkedIn Scraper]{Colors.END} Operacao 'Caminho da Raposa' Iniciada.")
         conf, credentials = load_env_configurations()
+
+        # startup_jitter: nunca inicia na mesma janela de tempo exata
+        if debug_mode:
+            print(f"  {Colors.YELLOW}[DEBUG]{Colors.END} Modo debug ativo — startup_jitter desabilitado.")
+        else:
+            jitter_secs = abs(random.gauss(0, 12)) * 60
+            if jitter_secs > 10:
+                print(f"  {Colors.DIM}[startup_jitter]{Colors.END} Aguardando {jitter_secs/60:.1f} min antes de iniciar...")
+                time.sleep(jitter_secs)
+
+        # MAX_APPLICATIONS: cap aleatorio baseado no limite configurado
+        max_cap = conf.MAX_DAILY_APPLICATIONS
+        MAX_APPLICATIONS = random.randint(max(1, max_cap - 2), max_cap + 2)
+        applications_sent = 0
+        print(f"  {Colors.CYAN}[Cap]{Colors.END} Meta desta sessao: {MAX_APPLICATIONS} aplicacoes")
         
         driver = setup_driver(conf, headless=False)
         wait = WebDriverWait(driver, 12)
         
         if not LinkedInScraper.login_to_linkedin(driver, credentials, conf):
-            print(f"{Colors.RED}❌ [EXIT]{Colors.END} Falha na validação de login. Operação cancelada para evitar loop em páginas bloqueadas.")
+            print(f"{Colors.RED}[EXIT]{Colors.END} Falha na validacao de login. Operacao cancelada.")
             try:
                 driver.quit()
             except:
                 pass
+            log_session(applications_sent)
             return
             
         print(f"\n{Colors.BLUE}🌐 [SearchBuilder]{Colors.END} Construindo alvos...")
@@ -501,6 +538,8 @@ class LinkedInScraper:
                     
                 print(f"  {Colors.GREEN}✅ -> Sucesso. Encontrei {total_items} vagas expostas.{Colors.END} Passando pela lista...")
                 
+                visited_job_ids = set()  # Rastreia jobs já processados por URL/ID único
+                
                 for index in range(total_items):
                     try:
                         current_cards = driver.find_elements(By.XPATH, " | ".join(xpath_selectors))
@@ -509,6 +548,25 @@ class LinkedInScraper:
                             break
                             
                         card = current_cards[index]
+                        
+                        # ── Extrai o job ID único do href para evitar processar o mesmo job ──
+                        job_uid = None
+                        try:
+                            card_link = card.find_element(By.XPATH, ".//a[contains(@href, '/jobs/view/')]")
+                            href = card_link.get_attribute("href") or ""
+                            # Extrai o ID numérico: /jobs/view/1234567890/
+                            match = re.search(r'/jobs/view/(\d+)', href)
+                            if match:
+                                job_uid = match.group(1)
+                        except Exception:
+                            pass
+                        
+                        if job_uid and job_uid in visited_job_ids:
+                            print(f"    {Colors.DIM}- [{index + 1}/{total_items}] [skip] Job já visitado (ID: {job_uid}). Pulando duplicata.{Colors.END}")
+                            continue
+                        
+                        if job_uid:
+                            visited_job_ids.add(job_uid)
 
                         # Skip probabilístico leve (~12%) — humanos não clicam em tudo que veem
                         if random.random() < 0.12:
@@ -588,27 +646,43 @@ class LinkedInScraper:
                                     primary_buttons = modal.find_elements(By.CSS_SELECTOR, "button.artdeco-button--primary")
                                     
                                     clicked = False
+                                    submitted = False
                                     for btn in primary_buttons:
                                         btn_text = btn.text.strip().lower()
-                                        if any(word in btn_text for word in ["next", "avançar", "continue", "continuar", "review", "revisar"]):
+                                        if any(word in btn_text for word in ["submit", "enviar"]):
+                                            # ── SUBMISSÃO REAL: clica no botão final ──
+                                            print(f"        {Colors.GREEN}{Colors.BOLD}🎯 Submetendo candidatura! Clicando em '{btn.text.strip()}'...{Colors.END}")
+                                            gaussian_delay(0.8, 0.3, min_s=0.4)
+                                            LinkedInScraper._human_click(driver, btn)
+                                            clicked = True
+                                            submitted = True
+                                            gaussian_delay(2.0, 0.5, min_s=1.5)  # aguarda confirmação do LinkedIn
+                                            
+                                            # Fecha o modal de confirmação pós-submissão ("Application sent!")
+                                            try:
+                                                post_modal_close = WebDriverWait(driver, 5).until(
+                                                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Dismiss'], button[data-test-modal-close-btn], button[aria-label*='Fechar']"))
+                                                )
+                                                LinkedInScraper._human_click(driver, post_modal_close)
+                                                print(f"        {Colors.GREEN}✅ Candidatura enviada com sucesso! Modal de confirmação fechado.{Colors.END}")
+                                            except Exception:
+                                                print(f"        {Colors.GREEN}✅ Candidatura enviada com sucesso!{Colors.END}")
+                                            break
+                                        elif any(word in btn_text for word in ["next", "avançar", "continue", "continuar", "review", "revisar"]):
                                             gaussian_delay(0.8, 0.3, min_s=0.4)  # hesitação pré-clique no Next
                                             print(f"        {Colors.DIM}Clicando em '{btn.text.strip()}'...{Colors.END}")
                                             LinkedInScraper._human_click(driver, btn)
                                             clicked = True
                                             gaussian_delay(1.8, 0.5, min_s=1.2)  # aguarda painel seguinte carregar
                                             break
-                                        elif any(word in btn_text for word in ["submit", "enviar"]):
-                                            # Se for o botão final, não vamos submeter para evitar spam real durante testes,
-                                            # a não ser que seja explicitamente solicitado. Vou clicar por enquanto para finalizar.
-                                            print(f"        {Colors.GREEN}🎯 Chegou no botão Final '{btn.text.strip()}'! (Abortando submissão de teste para segurança){Colors.END}")
-                                            # Para habilitar a submissão real: driver.execute_script("arguments[0].click();", btn)
-                                            clicked = False # Força o loop a fechar o modal na próxima etapa
-                                            break
+                                            
+                                    if submitted:
+                                        break  # Sai do loop de painéis — candidatura já foi enviada
                                             
                                     if not clicked:
                                         # Se não conseguiu clicar em avançar, ou encontrou uma tela de perguntas complexas obrigatórias,
                                         # nós fechamos o modal para ir para a próxima vaga.
-                                        print(f"        {Colors.YELLOW}⚠️ Requer intervenção manual ou chegamos no fim. Descartando candidatura para seguir com o loop.{Colors.END}")
+                                        print(f"        {Colors.YELLOW}⚠️ Requer intervenção manual. Descartando candidatura para seguir com o loop.{Colors.END}")
                                         close_modal_btn = modal.find_element(By.CSS_SELECTOR, "button[data-test-modal-close-btn], button[aria-label*='Dismiss'], button[aria-label*='Fechar']")
                                         LinkedInScraper._human_click(driver, close_modal_btn)
 
@@ -632,6 +706,24 @@ class LinkedInScraper:
                                     break
                                     
                             human_delay(1.0, 2.0)
+
+                            # --- Contagem e controles de sessao ---
+                            applications_sent += 1
+                            print(f"      {Colors.GREEN}[{applications_sent}/{MAX_APPLICATIONS}]{Colors.END} Aplicacao processada.")
+
+                            # Cap: encerra quando o limite da sessao e atingido
+                            if applications_sent >= MAX_APPLICATIONS:
+                                print(f"\n  {Colors.YELLOW}[Cap atingido]{Colors.END} {MAX_APPLICATIONS} aplicacoes. Encerrando sessao com seguranca.")
+                                log_session(applications_sent)
+                                try:
+                                    driver.quit()
+                                except:
+                                    pass
+                                return
+
+                            # Block pause a cada 5 aplicacoes enviadas com sucesso
+                            if applications_sent % 5 == 0:
+                                block_pause()
                             
                         except Exception as e:
                             print(f"      {Colors.YELLOW}⚠️ Easy Apply ausente nesta vaga ou bloqueado.{Colors.END}")
@@ -641,10 +733,12 @@ class LinkedInScraper:
                     except Exception as e:
                         print(f"    {Colors.RED}❌ [Erro Inesperado]{Colors.END} Falha ao processar item {index + 1}: {e}")
                 
-                human_delay(2.0, 3.5)
+                # Delay entre paginas: gaussiano ~18s com jitter (nao-uniforme)
+                gaussian_delay(random.gauss(18, 4), sigma_s=3, min_s=10)
                 
-        print(f"\n{Colors.GREEN}{Colors.BOLD}🕷️ [Arachne]{Colors.END} Fim da caçada. Todas as URLs e páginas processadas.")
-        
+        print(f"\n{Colors.GREEN}{Colors.BOLD}[Arachne]{Colors.END} Fim da cacada. Todas as URLs e paginas processadas.")
+        log_session(applications_sent)
+
         try:
             driver.quit()
         except:

@@ -17,6 +17,7 @@ class ScraperConfig:
     VERBOSE: bool = False
     CHROME_PROFILE_DIR: str = ""
     DEFAULT_DESCRIPTION_TEXT: str = "Tenho ampla experiência na área, sempre focado em entregar resultados com qualidade técnica e alinhamento aos objetivos da empresa. Sou proativo e busco melhorar continuamente."
+    MAX_DAILY_APPLICATIONS: int = 12
 
 @dataclass
 class UserCredentials:
@@ -85,6 +86,11 @@ def load_env_configurations():
                             config.CHROME_PROFILE_DIR = val_str
                         elif key_str == "DEFAULT_DESCRIPTION_TEXT":
                             config.DEFAULT_DESCRIPTION_TEXT = val_str
+                        elif key_str == "MAX_DAILY_APPLICATIONS":
+                            try:
+                                config.MAX_DAILY_APPLICATIONS = int(val_str)
+                            except ValueError:
+                                pass
                                 
             print(f"{Colors.GREEN}✔{Colors.END} {Colors.BOLD}[.env Loaded]{Colors.END} Configurations and credentials loaded successfully from local .env file.")
         except Exception as e:

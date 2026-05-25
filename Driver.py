@@ -18,7 +18,8 @@ class ArachneDriver:
         subparsers = parser.add_subparsers(dest="command", help="Comandos disponíveis")
         
         # Comandos principais
-        subparsers.add_parser("scrape_linkedin", help="Inicia a caçada no LinkedIn (Caminho da Raposa)")
+        linkedin_parser = subparsers.add_parser("scrape_linkedin", help="Inicia a caçada no LinkedIn (Caminho da Raposa)")
+        linkedin_parser.add_argument("--debug", action="store_true", help="Modo debug: desabilita startup_jitter e delays de segurança")
         subparsers.add_parser("scrape_catho", help="Inicia a caçada furtiva na Catho")
         subparsers.add_parser("launch_browser", help="Abre o navegador com o perfil persistente para validação humana")
         
@@ -39,7 +40,7 @@ class ArachneDriver:
 
         # Roteamento elegante dos comandos
         if args.command == "scrape_linkedin":
-            LinkedInScraper.scrape_linkedin()
+            LinkedInScraper.scrape_linkedin(debug_mode=getattr(args, 'debug', False))
             
         elif args.command == "scrape_catho":
             scrape_catho()
