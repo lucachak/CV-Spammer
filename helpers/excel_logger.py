@@ -1,6 +1,8 @@
-import os
 import datetime
+import os
+
 from openpyxl import Workbook, load_workbook
+
 
 class ExcelLogger:
     def __init__(self, filename="aplicacoes_catho.xlsx"):
@@ -12,14 +14,12 @@ class ExcelLogger:
             wb = Workbook()
             ws = wb.active
             ws.title = "Aplicações"
-            # Define headers
             ws.append(["Nome da Empresa", "Vaga", "Data de Aplicação"])
-            
-            # Adjust column widths for better readability
-            ws.column_dimensions['A'].width = 30
-            ws.column_dimensions['B'].width = 40
-            ws.column_dimensions['C'].width = 20
-            
+
+            ws.column_dimensions["A"].width = 30
+            ws.column_dimensions["B"].width = 40
+            ws.column_dimensions["C"].width = 20
+
             wb.save(self.filename)
 
     def log_application(self, company_name, job_title):
@@ -32,5 +32,5 @@ class ExcelLogger:
         except Exception as e:
             print(f"Error logging to Excel: {e}")
 
-# Global instance to be used by the scraper
+
 excel_logger = ExcelLogger()
