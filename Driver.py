@@ -32,6 +32,10 @@ class ArachneDriver:
             help="Abre o navegador com o perfil persistente para validação humana",
         )
 
+        subparsers.add_parser(
+            "read_sheet", help="Retorna os dados coletados ao longo do tempo"
+        )
+
         test_parser = subparsers.add_parser("test", help="Modo de testes e utilitários")
         test_parser.add_argument(
             "action",
@@ -53,9 +57,9 @@ class ArachneDriver:
 
         elif args.command == "launch_browser":
             LaunchBrowser.run()
-        
+
         elif args.command == "read_sheet":
-             
+            Reader().read_planilha()
 
         elif args.command == "test":
             if args.action == "url":
@@ -66,4 +70,3 @@ class ArachneDriver:
 
 if __name__ == "__main__":
     ArachneDriver.execute()
-

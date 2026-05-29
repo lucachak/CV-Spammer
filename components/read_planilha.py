@@ -15,13 +15,3 @@ class Reader:
         for row in DATA.iter_rows(min_row=2, values_only=True):
             self.dados.append(dict(zip(self.headers, row)))
         [print(x) for x in self.dados]
-
-
-def main() -> None:
-
-    r = Reader()
-    r.read_planilha()
-
-
-if __name__ == "__main__":
-    main()
